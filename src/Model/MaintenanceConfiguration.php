@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Synolia\SyliusMaintenancePlugin\Model;
 
+use Sylius\Component\Core\Model\ChannelInterface;
+
 class MaintenanceConfiguration
 {
     private string $ipAddresses = '';
@@ -15,6 +17,8 @@ class MaintenanceConfiguration
     private ?\DateTime $startDate;
 
     private ?\DateTime $endDate;
+
+    private ?array $channels = null;
 
     public function __construct()
     {
@@ -114,6 +118,9 @@ class MaintenanceConfiguration
         if (array_key_exists('ips', $dataFromMaintenanceYaml)) {
             $this->setIpAddresses(implode(',', $dataFromMaintenanceYaml['ips']));
         }
+        if (array_key_exists('channels', $dataFromMaintenanceYaml)) {
+            $this->setChannels($dataFromMaintenanceYaml['channels']);
+        }
         if (array_key_exists('scheduler', $dataFromMaintenanceYaml)) {
             $startDate = \DateTime::createFromFormat('Y-m-d H:i:s', $dataFromMaintenanceYaml['scheduler']['start_date'] ?? '');
             $this->setStartDate(false === $startDate ? null : $startDate);
@@ -123,6 +130,30 @@ class MaintenanceConfiguration
         if (array_key_exists('custom_message', $dataFromMaintenanceYaml)) {
             $this->setCustomMessage($dataFromMaintenanceYaml['custom_message'] ?? '');
         }
+
+        return $this;
+    }
+
+    public function getChannels(): ?array
+    {
+        return $this->channels;
+    }
+
+    public function getChannelsCode(): ?array
+    {
+        if ($this->channels === null) {
+            return null;
+        }
+
+        return \array_map(
+            function (ChannelInterface $channel): ?string {return $channel->getCode(); },
+            $this->channels
+        );
+    }
+
+    public function setChannels(?array $channels): self
+    {
+        $this->channels = $channels;
 
         return $this;
     }

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Synolia\SyliusMaintenancePlugin\EventSubscriber;
 
+use Sylius\Component\Channel\Context\ChannelContextInterface;
+use Sylius\Component\Resource\Repository\RepositoryInterface;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Response;
@@ -15,6 +17,10 @@ use Twig\Environment;
 
 final class MaintenanceEventsubscriber implements EventSubscriberInterface
 {
+    private RepositoryInterface $channelRepository;
+
+    private ChannelContextInterface $channelContext;
+
     private TranslatorInterface $translator;
 
     private ParameterBagInterface $params;
@@ -27,12 +33,16 @@ final class MaintenanceEventsubscriber implements EventSubscriberInterface
         TranslatorInterface $translator,
         ParameterBagInterface $params,
         Environment $twig,
-        MaintenanceConfigurationFactory $configurationFactory
+        MaintenanceConfigurationFactory $configurationFactory,
+        ChannelContextInterface $channelContext,
+        RepositoryInterface $channelRepository
     ) {
         $this->translator = $translator;
         $this->params = $params;
         $this->twig = $twig;
         $this->configurationFactory = $configurationFactory;
+        $this->channelContext = $channelContext;
+        $this->channelRepository = $channelRepository;
     }
 
     public static function getSubscribedEvents(): array
@@ -44,32 +54,11 @@ final class MaintenanceEventsubscriber implements EventSubscriberInterface
 
     public function handle(RequestEvent $event): void
     {
-        $getRequestUri = $event->getRequest()->getRequestUri();
-        /** @var string $adminPrefix */
-        $adminPrefix = $this->params->get('sylius_admin.path_name');
-        $ipUser = $event->getRequest()->getClientIp();
+        if (!$this->showMaintenance($event)) {
+            return;
+        }
+
         $maintenanceConfiguration = $this->configurationFactory->get();
-
-        if (!$maintenanceConfiguration->isEnabled()) {
-            return;
-        }
-
-        $authorizedIps = $maintenanceConfiguration->getArrayIpsAddresses();
-        if (in_array($ipUser, $authorizedIps, true)) {
-            return;
-        }
-
-        if (false === $this->isActuallyScheduledMaintenance($maintenanceConfiguration) &&
-            (null !== $maintenanceConfiguration->getStartDate() ||
-             null !== $maintenanceConfiguration->getEndDate())
-        ) {
-            return;
-        }
-
-        if (false !== mb_strpos($getRequestUri, $adminPrefix, 1)) {
-            return;
-        }
-
         $responseContent = $this->translator->trans('maintenance.ui.message');
 
         if ('' !== $maintenanceConfiguration->getCustomMessage()) {
@@ -100,5 +89,46 @@ final class MaintenanceEventsubscriber implements EventSubscriberInterface
         }
         // No schedule date
         return false;
+    }
+
+    private function showMaintenance(RequestEvent $event): bool
+    {
+        $getRequestUri = $event->getRequest()->getRequestUri();
+        /** @var string $adminPrefix */
+        $adminPrefix = $this->params->get('sylius_admin.path_name');
+        $maintenanceConfiguration = $this->configurationFactory->get();
+
+        $ipUser = $event->getRequest()->getClientIp();
+        if (!$maintenanceConfiguration->isEnabled()) {
+            return false;
+        }
+
+        $authorizedIps = $maintenanceConfiguration->getArrayIpsAddresses();
+        if (in_array($ipUser, $authorizedIps, true)) {
+            return false;
+        }
+
+        if (false === $this->isActuallyScheduledMaintenance($maintenanceConfiguration) &&
+            (null !== $maintenanceConfiguration->getStartDate() ||
+                null !== $maintenanceConfiguration->getEndDate())
+        ) {
+            return false;
+        }
+
+        if (false !== mb_strpos($getRequestUri, $adminPrefix, 1)) {
+            return false;
+        }
+
+        if ($this->channelRepository->count([]) > 1) {
+            if (!\is_array($maintenanceConfiguration->getChannels())) {
+                return false;
+            }
+
+            if (!\in_array($this->channelContext->getChannel()->getCode(), $maintenanceConfiguration->getChannels(), true)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
